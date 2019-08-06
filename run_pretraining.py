@@ -102,6 +102,11 @@ class EHRDataset(Dataset):
             """
             admissions = []
             for _, row in data.iterrows():
+                # try:
+                #     admission = [list(row['ICD10']), list(row['ATC4'])]
+                # except TypeError:
+                #     print(row)
+                #     continue
                 admission = [list(row['ICD10']), list(row['ATC4'])]
                 admissions.append(admission)
             return admissions
@@ -169,7 +174,7 @@ def load_dataset(args):
 
     # load data
     data_multi = pd.read_pickle(os.path.join(
-        data_dir, 'data-multi-visit.pkl')).iloc[:, :4]
+        data_dir, 'data-multi-visit.pkl'))
     data_single = pd.read_pickle(
         os.path.join(data_dir, 'data-single-visit.pkl'))
 
@@ -207,7 +212,7 @@ def main():
     parser.add_argument("--model_name", default='GBert-pretraining', type=str, required=False,
                         help="model name")
     parser.add_argument("--data_dir",
-                        default='./data',
+                        default='./data/data_v1',
                         type=str,
                         required=False,
                         help="The input data dir.")

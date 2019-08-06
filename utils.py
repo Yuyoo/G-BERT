@@ -4,10 +4,10 @@ import numpy as np
 import os
 import logging
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                    datefmt='%m/%d/%Y %H:%M:%S',
-                    level=logging.INFO)
-logger = logging.getLogger(__name__)
+# logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+#                     datefmt='%m/%d/%Y %H:%M:%S',
+#                     level=logging.INFO)
+# logger = logging.getLogger(__name__)
 
 
 class Voc(object):
@@ -31,7 +31,7 @@ def multi_label_metric(y_gt, y_pred, y_prob):
             out_list = np.where(y_pred[b] == 1)[0]
             inter = set(out_list) & set(target)
             union = set(out_list) | set(target)
-            jaccard_score = 0 if union == 0 else len(inter) / len(union)
+            jaccard_score = 0 if len(union) == 0 else len(inter) / len(union)
             score.append(jaccard_score)
         return np.mean(score)
 
@@ -96,18 +96,18 @@ def multi_label_metric(y_gt, y_pred, y_prob):
             precision += TP / len(sort_index[i])
         return precision / len(y_gt)
 
-    auc = roc_auc(y_gt, y_prob)
+    auc = roc_auc_score(y_gt, y_prob, average="micro")
     p_1 = precision_at_k(y_gt, y_prob, k=1)
     p_3 = precision_at_k(y_gt, y_prob, k=3)
     p_5 = precision_at_k(y_gt, y_prob, k=5)
     f1 = f1(y_gt, y_pred)
-    prauc = precision_auc(y_gt, y_prob)
+    prauc = average_precision_score(y_gt, y_prob, average="micro")
     ja = jaccard(y_gt, y_pred)
     avg_prc = average_prc(y_gt, y_pred)
     avg_recall = average_recall(y_gt, y_pred)
     avg_f1 = average_f1(avg_prc, avg_recall)
 
-    return ja, prauc, np.mean(avg_prc), np.mean(avg_recall), np.mean(avg_f1)
+    return ja, prauc, np.mean(avg_prc), np.mean(avg_recall), np.mean(avg_f1), auc
 
 
 def metric_report(y_pred, y_true, therhold=0.5):
@@ -116,19 +116,20 @@ def metric_report(y_pred, y_true, therhold=0.5):
     y_pred[y_pred <= therhold] = 0
 
     acc_container = {}
-    ja, prauc, avg_p, avg_r, avg_f1 = multi_label_metric(
+    ja, prauc, avg_p, avg_r, avg_f1, auc = multi_label_metric(
         y_true, y_pred, y_prob)
     acc_container['jaccard'] = ja
     acc_container['f1'] = avg_f1
     acc_container['prauc'] = prauc
+    acc_container['auc'] = auc
 
     # acc_container['jaccard'] = jaccard_similarity_score(y_true, y_pred)
     # acc_container['f1'] = f1(y_true, y_pred)
     # acc_container['auc'] = roc_auc(y_true, y_prob)
     # acc_container['prauc'] = precision_auc(y_true, y_prob)
 
-    for k, v in acc_container.items():
-        logger.info('%-10s : %-10.4f' % (k, v))
+    # for k, v in acc_container.items():
+    #     logger.info('%-10s : %-10.4f' % (k, v))
 
     return acc_container
 

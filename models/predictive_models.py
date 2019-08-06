@@ -138,7 +138,7 @@ class GBERT_Predict(PreTrainedBertModel):
         self.bert = BERT(config, tokenizer.dx_voc, tokenizer.rx_voc)
         self.dense = nn.ModuleList([MappingHead(config), MappingHead(config)])
         self.cls = nn.Sequential(nn.Linear(2*config.hidden_size, 2*config.hidden_size),
-                                 nn.ReLU(), nn.Linear(2*config.hidden_size, len(tokenizer.rx_voc_multi.word2idx)))
+                                 nn.ReLU(), nn.Linear(2*config.hidden_size, len(tokenizer.dx_voc_multi_pa.word2idx)))
 
         self.apply(self.init_bert_weights)
 
@@ -162,7 +162,7 @@ class GBERT_Predict(PreTrainedBertModel):
 
         # mean and concat for rx prediction task
         rx_logits = []
-        for i in range(rx_labels.size(0)):
+        for i in range(dx_labels.size(0)):
             # mean
             dx_mean = torch.mean(dx_bert_pool[0:i+1, :], dim=0, keepdim=True)
             rx_mean = torch.mean(rx_bert_pool[0:i+1, :], dim=0, keepdim=True)
@@ -171,7 +171,7 @@ class GBERT_Predict(PreTrainedBertModel):
             rx_logits.append(self.cls(concat))
 
         rx_logits = torch.cat(rx_logits, dim=0)
-        loss = F.binary_cross_entropy_with_logits(rx_logits, rx_labels)
+        loss = F.binary_cross_entropy_with_logits(rx_logits, dx_labels)
         return loss, rx_logits
 
 

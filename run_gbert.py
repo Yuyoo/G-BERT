@@ -37,12 +37,20 @@ class EHRTokenizer(object):
         # code only in multi-visit data
         self.rx_voc_multi = Voc()
         self.dx_voc_multi = Voc()
+        self.rx_voc_multi_pa = Voc()
+        self.dx_voc_multi_pa = Voc()
         with open(os.path.join(data_dir, 'rx-vocab-multi.txt'), 'r') as fin:
             for code in fin:
                 self.rx_voc_multi.add_sentence([code.rstrip('\n')])
         with open(os.path.join(data_dir, 'dx-vocab-multi.txt'), 'r') as fin:
             for code in fin:
                 self.dx_voc_multi.add_sentence([code.rstrip('\n')])
+        with open(os.path.join(data_dir, 'rx-vocab-multi-pa.txt'), 'r') as fin:
+            for code in fin:
+                self.rx_voc_multi_pa.add_sentence([code.rstrip('\n')])
+        with open(os.path.join(data_dir, 'dx-vocab-multi-pa.txt'), 'r') as fin:
+            for code in fin:
+                self.dx_voc_multi_pa.add_sentence([code.rstrip('\n')])
 
     def add_vocab(self, vocab_file):
         voc = self.vocab
@@ -86,7 +94,8 @@ class EHRDataset(Dataset):
                 item_df = data[data['SUBJECT_ID'] == subject_id]
                 patient = []
                 for _, row in item_df.iterrows():
-                    admission = [list(row['ICD10']), list(row['ATC4'])]
+                    admission = [list(row['ICD10']), list(row['ATC4']), list(row['ICD10_level_parents']),
+                                 list(row['ATC4_level_parents'])]
                     patient.append(admission)
                 if len(patient) < 2:
                     continue
@@ -122,8 +131,8 @@ class EHRDataset(Dataset):
             # output_rx_tokens.append(list(adm[1]))
 
             if idx != 0:
-                output_rx_tokens.append(list(adm[1]))
-                output_dx_tokens.append(list(adm[0]))
+                output_rx_tokens.append(list(adm[3]))
+                output_dx_tokens.append(list(adm[2]))
 
         """convert tokens to id
         """
@@ -131,18 +140,18 @@ class EHRDataset(Dataset):
         output_dx_labels = []  # (adm-1, dx_voc_size)
         output_rx_labels = []  # (adm-1, rx_voc_size)
 
-        dx_voc_size = len(self.tokenizer.dx_voc_multi.word2idx)
-        rx_voc_size = len(self.tokenizer.rx_voc_multi.word2idx)
+        dx_voc_size = len(self.tokenizer.dx_voc_multi_pa.word2idx)
+        rx_voc_size = len(self.tokenizer.rx_voc_multi_pa.word2idx)
         for tokens in output_dx_tokens:
             tmp_labels = np.zeros(dx_voc_size)
             tmp_labels[list(
-                map(lambda x: self.tokenizer.dx_voc_multi.word2idx[x], tokens))] = 1
+                map(lambda x: self.tokenizer.dx_voc_multi_pa.word2idx[x], tokens))] = 1
             output_dx_labels.append(tmp_labels)
 
         for tokens in output_rx_tokens:
             tmp_labels = np.zeros(rx_voc_size)
             tmp_labels[list(
-                map(lambda x: self.tokenizer.rx_voc_multi.word2idx[x], tokens))] = 1
+                map(lambda x: self.tokenizer.rx_voc_multi_pa.word2idx[x], tokens))] = 1
             output_rx_labels.append(tmp_labels)
 
         if cur_id < 5:
@@ -156,7 +165,7 @@ class EHRDataset(Dataset):
         assert len(input_ids) == (self.seq_len *
                                   2 * len(self.records[subject_id]))
         assert len(output_dx_labels) == (len(self.records[subject_id]) - 1)
-        # assert len(output_rx_labels) == len(self.records[subject_id])-1
+        assert len(output_rx_labels) == len(self.records[subject_id]) - 1
 
         cur_tensors = (torch.tensor(input_ids).view(-1, self.seq_len),
                        torch.tensor(output_dx_labels, dtype=torch.float),
@@ -201,7 +210,7 @@ def main():
     parser.add_argument("--model_name", default='GBert-predict', type=str, required=False,
                         help="model name")
     parser.add_argument("--data_dir",
-                        default='./data',
+                        default='./data/data_v1',
                         type=str,
                         required=False,
                         help="The input data dir.")
@@ -225,7 +234,7 @@ def main():
                         action='store_true',
                         help="if use ontology embedding")
     parser.add_argument("--therhold",
-                        default=0.3,
+                        default=0.25,
                         type=float,
                         help="therhold.")
     parser.add_argument("--max_seq_length",
@@ -255,7 +264,7 @@ def main():
                         type=float,
                         help="The initial learning rate for Adam.")
     parser.add_argument("--num_train_epochs",
-                        default=20.0,
+                        default=50.0,
                         type=float,
                         help="Total number of training epochs to perform.")
     parser.add_argument("--no_cuda",
@@ -279,7 +288,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device("cuda:1" if torch.cuda.is_available()
-                          and not args.no_cuda else "cpu")
+                                      and not args.no_cuda else "cpu")
 
     if not args.do_train and not args.do_eval:
         raise ValueError(
@@ -352,7 +361,7 @@ def main():
         dx_history = {'prauc': []}
         rx_history = {'prauc': []}
 
-        for _ in trange(int(args.num_train_epochs), desc="Epoch"):
+        for epoch in trange(int(args.num_train_epochs), desc="Epoch"):
             print('')
             tr_loss = 0
             nb_tr_examples, nb_tr_steps = 0, 0
@@ -391,13 +400,15 @@ def main():
                 for eval_input in tqdm(eval_dataloader, desc="Evaluating"):
                     eval_input = tuple(t.to(device) for t in eval_input)
                     input_ids, dx_labels, rx_labels = eval_input
-                    input_ids, dx_labels, rx_labels = input_ids.squeeze(
-                    ), dx_labels.squeeze(), rx_labels.squeeze(dim=0)
+                    input_ids, dx_labels, rx_labels = input_ids.squeeze(dim=0), dx_labels.squeeze(
+                        dim=0), rx_labels.squeeze(dim=0)
                     with torch.no_grad():
                         loss, rx_logits = model(
                             input_ids, dx_labels=dx_labels, rx_labels=rx_labels)
                         rx_y_preds.append(t2n(torch.sigmoid(rx_logits)))
-                        rx_y_trues.append(t2n(rx_labels))
+                        rx_y_trues.append(t2n(dx_labels))
+                        # rx_y_preds.append(t2n(torch.sigmoid(rx_logits)))
+                        # rx_y_trues.append(t2n(rx_labels))
                         # dx_y_preds.append(t2n(torch.sigmoid(dx_logits)))
                         # dx_y_trues.append(
                         #     t2n(dx_labels.view(-1, len(tokenizer.dx_voc.word2idx))))
@@ -420,6 +431,12 @@ def main():
                     # save model
                     torch.save(model_to_save.state_dict(),
                                rx_output_model_file)
+
+            with open(os.path.join(args.output_dir, 'metrics_log.txt'), 'a') as f:
+                f.write("epoch{}, jaccard:{}, f1:{}, prauc:{}, auc:{}\n".format(epoch, rx_acc_container['jaccard'],
+                                                                                rx_acc_container['f1'],
+                                                                                rx_acc_container['prauc'],
+                                                                                rx_acc_container['auc']))
 
         with open(os.path.join(args.output_dir, 'bert_config.json'), 'w', encoding='utf-8') as fout:
             fout.write(model.config.to_json_string())
